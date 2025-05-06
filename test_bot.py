@@ -2,6 +2,7 @@ import random
 import asyncio
 import pymysql
 import config
+from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.enums.parse_mode import ParseMode
 from aiogram.client.default import DefaultBotProperties
@@ -13,7 +14,8 @@ from aiogram import Router
 from database import (
     init_db, update_stats,
     get_question_stats, get_user_top_mistakes,
-    reset_user_stats, get_all_user_shown_questions_count
+    reset_user_stats, get_all_user_shown_questions_count,
+    log_user_answer, get_daily_user_stats
 )
 
 bot = Bot(
@@ -27,6 +29,7 @@ questions = []
 user_question_map = {}
 last_question_text = {}
 user_progress = {}
+user_seen_questions = {}  # user_id -> set(question_text)
 
 def load_questions_from_mysql():
     connection = pymysql.connect(
@@ -68,26 +71,23 @@ async def start_handler(message: types.Message):
 async def send_next_question(chat_id):
     user_id = chat_id
     previous_question = last_question_text.get(user_id)
+    seen = user_seen_questions.setdefault(user_id, set())
 
-    available_questions = [q for q in questions if q["question"] != previous_question]
-    if not available_questions:
-        available_questions = questions
+    unseen_questions = [q for q in questions if q["question"] not in seen and q["question"] != previous_question]
+    if not unseen_questions:
+        unseen_questions = [q for q in questions if q["question"] != previous_question]
 
-    weights = []
-    for q in available_questions:
-        stats = get_question_stats(user_id, q["question"])
-        shown = stats.get("shown", 0)
-        wrong = stats.get("wrong", 0)
-        weight = 1.0 if shown == 0 else (wrong + 1) / shown
-        weights.append(weight)
+    if not unseen_questions:
+        unseen_questions = questions
 
-    q = random.choices(available_questions, weights=weights, k=1)[0]
+    q = random.choice(unseen_questions)
     shuffled = q["options"].copy()
     random.shuffle(shuffled)
     q["shuffled_options"] = shuffled
 
     user_question_map[user_id] = q
     last_question_text[user_id] = q["question"]
+    seen.add(q["question"])
 
     text = f"<b>Вопрос:</b>\n{q['question']}\n\n"
     for idx, option in enumerate(shuffled, 1):
@@ -108,16 +108,18 @@ async def handle_answer(callback: types.CallbackQuery):
     index = int(callback.data.replace("opt_", ""))
     selected = q["shuffled_options"][index].strip()
     correct = q["correct"].strip()
-    update_stats(user_id, q["question"], selected == correct)
+    is_correct = selected == correct
+    update_stats(user_id, q["question"], is_correct)
+    log_user_answer(user_id, datetime.utcnow().date(), is_correct)
 
     progress = user_progress.setdefault(user_id, {"total": 0, "correct": 0})
     progress["total"] += 1
-    if selected == correct:
+    if is_correct:
         progress["correct"] += 1
 
     text = (
         f"✅ Верно!\n<b>{q['question']}</b>\nОтвет: <b>{correct}</b>"
-        if selected == correct else
+        if is_correct else
         f"❌ Неверно!\n<b>{q['question']}</b>\nПравильный ответ: <b>{correct}</b>"
     )
 
@@ -155,6 +157,20 @@ async def send_progress_report(chat_id, user_id):
 async def progress_handler(message: types.Message):
     await send_progress_report(message.chat.id, message.from_user.id)
 
+@router.message(Command("week"))
+async def weekly_stats_handler(message: types.Message):
+    user_id = message.from_user.id
+    today = datetime.utcnow().date()
+    text = "<b>📅 Ваша статистика за последние 7 дней:</b>\n"
+    for i in range(7):
+        day = today - timedelta(days=i)
+        total, correct = get_daily_user_stats(user_id, day)
+        if total == 0:
+            continue
+        percent = round(correct / total * 100, 1) if total > 0 else 0
+        text += f"{day.strftime('%Y-%m-%d')}: {correct}/{total} — {percent}%\n"
+    await message.answer(text or "📭 Нет данных за неделю.")
+
 @router.message(Command("stats"))
 async def stats_handler(message: types.Message):
     results = get_user_top_mistakes(message.from_user.id)
@@ -171,6 +187,7 @@ async def stats_handler(message: types.Message):
 async def reset_handler(message: types.Message):
     reset_user_stats(message.from_user.id)
     user_progress[message.from_user.id] = {"total": 0, "correct": 0}
+    user_seen_questions[message.from_user.id] = set()
     await message.answer("🔄 Ваша статистика сброшена.")
 
 @router.message(Command("help"))
@@ -184,6 +201,7 @@ async def help_handler(message: types.Message):
         "/start — начать или продолжить\n"
         "/stats — твоя статистика ошибок\n"
         "/progress — промежуточный отчёт\n"
+        "/week — статистика за последние 7 дней\n"
         "/reset — сбросить статистику\n"
         "/help — это меню"
     )
