@@ -75,6 +75,30 @@ async def start_handler(message: types.Message):
     await message.answer("🧠 Привет! Это тренажёр по медэкспертизе. Начнём!")
     await send_next_question(user_id)
 
+
+async def send_progress_report(chat_id, user_id):
+    progress = user_progress.get(user_id)
+    if not progress:
+        await bot.send_message(chat_id, "📭 Нет статистики.")
+        return
+
+    total = progress["total"]
+    correct_count = progress["correct"]
+    incorrect = total - correct_count
+    percent = round(correct_count / total * 100, 1) if total else 0.0
+    answered_qs = get_all_user_shown_questions_count(user_id)
+    remaining = max(len(questions) - answered_qs, 0)
+
+    report = (
+        f"📊 <b>Промежуточный отчёт</b>\n"
+        f"Всего решено: <b>{total}</b>\n"
+        f"Верно: <b>{correct_count}</b>\n"
+        f"Ошибок: <b>{incorrect}</b>\n"
+        f"Точность: <b>{percent}%</b>\n"
+        f"📚 Ещё не отвечено: <b>{remaining}</b>"
+    )
+    await bot.send_message(chat_id, report)
+
 async def send_next_question(chat_id):
     user_id = chat_id
     previous_question = last_question_text.get(user_id)
