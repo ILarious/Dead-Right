@@ -213,8 +213,7 @@ async def stats_handler(message: types.Message):
         date_str = date_obj.strftime('%Y-%m-%d') if date_obj else "неизвестно"
         lines.append(f"{i}. {question[:40]}... — вы выбрали: {user_answer}, верно: {correct_answer} (дата: {date_str})")
 
-    await message.answer("
-".join(lines))
+    await message.answer("\n".join(lines))
 
 @router.message(Command("errors"))
 async def train_mistakes_handler(message: types.Message):
