@@ -10,7 +10,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.filters import Command
 from aiogram import Router
 
-
 from database import (
     init_db, update_stats,
     get_question_stats, get_user_top_mistakes,
@@ -133,7 +132,8 @@ async def handle_answer(callback: types.CallbackQuery):
 
 async def send_progress_report(chat_id, user_id):
     progress = user_progress.get(user_id)
-    if not progress:
+    if not progress or progress["total"] == 0:
+        await bot.send_message(chat_id, "ℹ️ Пока нет данных для отчёта. Ответьте хотя бы на один вопрос.")
         return
 
     total = progress["total"]
@@ -161,15 +161,21 @@ async def progress_handler(message: types.Message):
 async def weekly_stats_handler(message: types.Message):
     user_id = message.from_user.id
     today = datetime.utcnow().date()
-    text = "<b>📅 Ваша статистика за последние 7 дней:</b>\n"
+    text_lines = []
     for i in range(7):
         day = today - timedelta(days=i)
         total, correct = get_daily_user_stats(user_id, day)
         if total == 0:
             continue
-        percent = round(correct / total * 100, 1) if total > 0 else 0
-        text += f"{day.strftime('%Y-%m-%d')}: {correct}/{total} — {percent}%\n"
-    await message.answer(text or "📭 Нет данных за неделю.")
+        percent = round(correct / total * 100, 1)
+        text_lines.append(f"{day.strftime('%Y-%m-%d')}: {correct}/{total} — {percent}%")
+
+    if text_lines:
+        text = "<b>📅 Ваша статистика за последние 7 дней:</b>\n" + "\n".join(text_lines)
+    else:
+        text = "📭 Нет данных за неделю."
+
+    await message.answer(text)
 
 @router.message(Command("stats"))
 async def stats_handler(message: types.Message):
