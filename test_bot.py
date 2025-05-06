@@ -14,7 +14,8 @@ from database import (
     init_db, update_stats,
     get_question_stats, get_user_top_mistakes,
     reset_user_stats, get_all_user_shown_questions_count,
-    log_user_answer, get_daily_user_stats
+    log_user_answer, get_daily_user_stats,
+    get_user_wrong_answers, get_mistake_questions
 )
 
 bot = Bot(
@@ -29,6 +30,10 @@ user_question_map = {}
 last_question_text = {}
 user_progress = {}
 user_seen_questions = {}  # user_id -> set(question_text)
+
+mistake_mode = {}  # user_id -> True/False
+mistake_questions = {}  # user_id -> list of mistake questions
+
 
 def load_questions_from_mysql():
     connection = pymysql.connect(
@@ -64,29 +69,38 @@ def create_keyboard(num_options):
 
 @router.message(Command("start"))
 async def start_handler(message: types.Message):
+    user_id = message.chat.id
+    mistake_mode[user_id] = False
     await message.answer("🧠 Привет! Это тренажёр по медэкспертизе. Начнём!")
-    await send_next_question(message.chat.id)
+    await send_next_question(user_id)
 
 async def send_next_question(chat_id):
     user_id = chat_id
     previous_question = last_question_text.get(user_id)
-    seen = user_seen_questions.setdefault(user_id, set())
 
-    unseen_questions = [q for q in questions if q["question"] not in seen and q["question"] != previous_question]
-    if not unseen_questions:
-        unseen_questions = [q for q in questions if q["question"] != previous_question]
+    if mistake_mode.get(user_id):
+        pool = mistake_questions.get(user_id, [])
+    else:
+        seen = user_seen_questions.setdefault(user_id, set())
+        pool = [q for q in questions if q["question"] not in seen and q["question"] != previous_question]
+        if not pool:
+            pool = [q for q in questions if q["question"] != previous_question]
+        if not pool:
+            pool = questions
 
-    if not unseen_questions:
-        unseen_questions = questions
+    if not pool:
+        await bot.send_message(chat_id, "📭 Вопросов не найдено.")
+        return
 
-    q = random.choice(unseen_questions)
+    q = random.choice(pool)
     shuffled = q["options"].copy()
     random.shuffle(shuffled)
     q["shuffled_options"] = shuffled
 
     user_question_map[user_id] = q
     last_question_text[user_id] = q["question"]
-    seen.add(q["question"])
+    if not mistake_mode.get(user_id):
+        user_seen_questions.setdefault(user_id, set()).add(q["question"])
 
     text = f"<b>Вопрос:</b>\n{q['question']}\n\n"
     for idx, option in enumerate(shuffled, 1):
@@ -123,6 +137,12 @@ async def handle_answer(callback: types.CallbackQuery):
     )
 
     await callback.message.edit_text(text)
+
+    if mistake_mode.get(user_id):
+        mistake_questions[user_id].remove(q)
+        if not mistake_questions[user_id]:
+            await bot.send_message(callback.message.chat.id, "🎯 Все ошибки отработаны! Возвращаемся к обычному режиму.")
+            mistake_mode[user_id] = False
 
     if progress["total"] % 50 == 0:
         await send_progress_report(callback.message.chat.id, user_id)
@@ -179,15 +199,27 @@ async def weekly_stats_handler(message: types.Message):
 
 @router.message(Command("stats"))
 async def stats_handler(message: types.Message):
-    results = get_user_top_mistakes(message.from_user.id)
-    if not results:
-        await message.answer("📬 У вас пока нет статистики.")
+    rows = get_user_wrong_answers(message.from_user.id)
+    if not rows:
+        await message.answer("📬 У вас пока нет ошибок.")
         return
 
-    text = "<b>📉 Ваши ошибки:</b>\n"
-    for i, (q, wrong, shown, rate) in enumerate(results, 1):
-        text += f"{i}. {q[:50]}... — {wrong}/{shown} ошибок ({rate}%)\n"
+    text = "<b>❌ Ошибки по вопросам:</b>\n"
+    for i, row in enumerate(rows, 1):
+        text += f"{i}. {row['question'][:40]}... — вы выбрали: {row['user_answer']}, верно: {row['correct_answer']} (дата: {row['answered_at'].strftime('%Y-%m-%d')})\n"
     await message.answer(text)
+
+@router.message(Command("errors"))
+async def train_mistakes_handler(message: types.Message):
+    user_id = message.from_user.id
+    mistake_mode[user_id] = True
+    mistake_questions[user_id] = get_mistake_questions(user_id)
+    if not mistake_questions[user_id]:
+        await message.answer("🎉 Нет ошибок для повторения — хорошая работа!")
+        mistake_mode[user_id] = False
+        return
+    await message.answer("🔁 Начинаем тренировку на ошибках!")
+    await send_next_question(user_id)
 
 @router.message(Command("reset"))
 async def reset_handler(message: types.Message):
@@ -204,11 +236,12 @@ async def help_handler(message: types.Message):
         "✅ Верно — идём дальше.\n"
         "❌ Неверно — бот покажет правильный.\n\n"
         "📈 <b>Команды:</b>\n"
-        "/start — начать или продолжить\n"
-        "/stats — твоя статистика ошибок\n"
-        "/progress — промежуточный отчёт\n"
-        "/week — статистика за последние 7 дней\n"
-        "/reset — сбросить статистику\n"
+        "/start — обычный режим\n"
+        "/errors — только ошибки\n"
+        "/stats — список ошибок\n"
+        "/progress — прогресс с точностью\n"
+        "/week — по дням\n"
+        "/reset — сбросить всё\n"
         "/help — это меню"
     )
     await message.answer(text)
