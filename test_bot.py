@@ -204,12 +204,18 @@ async def stats_handler(message: types.Message):
         await message.answer("📬 У вас пока нет ошибок.")
         return
 
-    text = "<b>❌ Ошибки по вопросам:</b>\n"
+    text = "<b>❌ Ошибки по вопросам:</b>
+"
     for i, row in enumerate(rows, 1):
-        date_str = row['answered_at'].strftime('%Y-%m-%d') if row['answered_at'] else "неизвестно"
-        text += f"{i}. {row['question'][:40]}... — вы выбрали: {row['user_answer']}, верно: {row['correct_answer']} (дата: {date_str})\n"
-    await message.answer(text)
+        question = row['question'] or "[вопрос не найден]"
+        user_answer = row['user_answer'] or "-"
+        correct_answer = row['correct_answer'] or "-"
+        date_obj = row.get('answered_at')
+        date_str = date_obj.strftime('%Y-%m-%d') if date_obj else "неизвестно"
+        text += f"{i}. {question[:40]}... — вы выбрали: {user_answer}, верно: {correct_answer} (дата: {date_str})
+"
 
+    await message.answer(text)
 
 @router.message(Command("errors"))
 async def train_mistakes_handler(message: types.Message):
