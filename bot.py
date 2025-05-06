@@ -123,7 +123,7 @@ async def handle_answer(callback: types.CallbackQuery):
     correct = q["correct"].strip()
     is_correct = selected == correct
     update_stats(user_id, q["question"], is_correct)
-    log_user_answer(user_id, datetime.utcnow().date(), is_correct)
+    log_user_answer(user_id, datetime.utcnow().date(), is_correct, q["question"], selected, correct)
 
     progress = user_progress.setdefault(user_id, {"total": 0, "correct": 0})
     progress["total"] += 1
@@ -206,8 +206,10 @@ async def stats_handler(message: types.Message):
 
     text = "<b>❌ Ошибки по вопросам:</b>\n"
     for i, row in enumerate(rows, 1):
-        text += f"{i}. {row['question'][:40]}... — вы выбрали: {row['user_answer']}, верно: {row['correct_answer']} (дата: {row['answered_at'].strftime('%Y-%m-%d')})\n"
+        date_str = row['answered_at'].strftime('%Y-%m-%d') if row['answered_at'] else "неизвестно"
+        text += f"{i}. {row['question'][:40]}... — вы выбрали: {row['user_answer']}, верно: {row['correct_answer']} (дата: {date_str})\n"
     await message.answer(text)
+
 
 @router.message(Command("errors"))
 async def train_mistakes_handler(message: types.Message):
