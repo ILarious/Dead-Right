@@ -33,6 +33,7 @@ user_seen_questions = {}  # user_id -> set(question_text)
 
 mistake_mode = {}  # user_id -> True/False
 mistake_questions = {}  # user_id -> list of mistake questions
+retry_attempts = {}  # user_id -> number of retries for current question
 
 
 def load_questions_from_mysql():
@@ -102,6 +103,8 @@ async def send_next_question(chat_id):
     if not mistake_mode.get(user_id):
         user_seen_questions.setdefault(user_id, set()).add(q["question"])
 
+    retry_attempts[user_id] = 0
+
     text = f"<b>Вопрос:</b>\n{q['question']}\n\n"
     for idx, option in enumerate(shuffled, 1):
         text += f"{idx}. {option}\n"
@@ -139,9 +142,17 @@ async def handle_answer(callback: types.CallbackQuery):
     await callback.message.edit_text(text)
 
     if mistake_mode.get(user_id):
-        if q in mistake_questions.get(user_id, []):
+        if is_correct and q in mistake_questions.get(user_id, []):
             mistake_questions[user_id].remove(q)
-        if not mistake_questions[user_id]:
+        elif not is_correct:
+            retry_attempts[user_id] += 1
+            if retry_attempts[user_id] < 2:
+                await asyncio.sleep(1)
+                await bot.send_message(callback.message.chat.id, "🔁 Попробуй ещё раз!")
+                await send_next_question(callback.message.chat.id)
+                return
+
+        if not mistake_questions.get(user_id):
             await bot.send_message(callback.message.chat.id, "🎯 Все ошибки отработаны! Возвращаемся к обычному режиму.")
             mistake_mode[user_id] = False
 
@@ -150,29 +161,6 @@ async def handle_answer(callback: types.CallbackQuery):
 
     await asyncio.sleep(1.5)
     await send_next_question(callback.message.chat.id)
-
-async def send_progress_report(chat_id, user_id):
-    progress = user_progress.get(user_id)
-    if not progress or progress["total"] == 0:
-        await bot.send_message(chat_id, "ℹ️ Пока нет данных для отчёта. Ответьте хотя бы на один вопрос.")
-        return
-
-    total = progress["total"]
-    correct_count = progress["correct"]
-    incorrect = total - correct_count
-    percent = round(correct_count / total * 100, 1)
-    answered_qs = get_all_user_shown_questions_count(user_id)
-    remaining = max(len(questions) - answered_qs, 0)
-
-    report = (
-        f"📊 <b>Промежуточный отчёт</b>\n"
-        f"Всего решено: <b>{total}</b>\n"
-        f"Верно: <b>{correct_count}</b>\n"
-        f"Ошибок: <b>{incorrect}</b>\n"
-        f"Точность: <b>{percent}%</b>\n"
-        f"📚 Ещё не отвечено: <b>{remaining}</b>"
-    )
-    await bot.send_message(chat_id, report)
 
 @router.message(Command("progress"))
 async def progress_handler(message: types.Message):
