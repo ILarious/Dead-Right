@@ -33,6 +33,7 @@ user_seen_questions = {}  # user_id -> set(question_text)
 
 mistake_mode = {}  # user_id -> True/False
 mistake_questions = {}  # user_id -> list of mistake questions
+retry_attempts = {}  # user_id -> number of retries for current question
 
 
 def load_questions_from_mysql():
@@ -74,6 +75,30 @@ async def start_handler(message: types.Message):
     await message.answer("🧠 Привет! Это тренажёр по медэкспертизе. Начнём!")
     await send_next_question(user_id)
 
+
+async def send_progress_report(chat_id, user_id):
+    progress = user_progress.get(user_id)
+    if not progress:
+        await bot.send_message(chat_id, "📭 Нет статистики.")
+        return
+
+    total = progress["total"]
+    correct_count = progress["correct"]
+    incorrect = total - correct_count
+    percent = round(correct_count / total * 100, 1) if total else 0.0
+    answered_qs = get_all_user_shown_questions_count(user_id)
+    remaining = max(len(questions) - answered_qs, 0)
+
+    report = (
+        f"📊 <b>Промежуточный отчёт</b>\n"
+        f"Всего решено: <b>{total}</b>\n"
+        f"Верно: <b>{correct_count}</b>\n"
+        f"Ошибок: <b>{incorrect}</b>\n"
+        f"Точность: <b>{percent}%</b>\n"
+        f"📚 Ещё не отвечено: <b>{remaining}</b>"
+    )
+    await bot.send_message(chat_id, report)
+
 async def send_next_question(chat_id):
     user_id = chat_id
     previous_question = last_question_text.get(user_id)
@@ -101,6 +126,8 @@ async def send_next_question(chat_id):
     last_question_text[user_id] = q["question"]
     if not mistake_mode.get(user_id):
         user_seen_questions.setdefault(user_id, set()).add(q["question"])
+
+    retry_attempts[user_id] = 0
 
     text = f"<b>Вопрос:</b>\n{q['question']}\n\n"
     for idx, option in enumerate(shuffled, 1):
@@ -139,8 +166,17 @@ async def handle_answer(callback: types.CallbackQuery):
     await callback.message.edit_text(text)
 
     if mistake_mode.get(user_id):
-        mistake_questions[user_id].remove(q)
-        if not mistake_questions[user_id]:
+        if is_correct and q in mistake_questions.get(user_id, []):
+            mistake_questions[user_id].remove(q)
+        elif not is_correct:
+            retry_attempts[user_id] += 1
+            if retry_attempts[user_id] < 2:
+                await asyncio.sleep(1)
+                await bot.send_message(callback.message.chat.id, "🔁 Попробуй ещё раз!")
+                await send_next_question(callback.message.chat.id)
+                return
+
+        if not mistake_questions.get(user_id):
             await bot.send_message(callback.message.chat.id, "🎯 Все ошибки отработаны! Возвращаемся к обычному режиму.")
             mistake_mode[user_id] = False
 
@@ -149,29 +185,6 @@ async def handle_answer(callback: types.CallbackQuery):
 
     await asyncio.sleep(1.5)
     await send_next_question(callback.message.chat.id)
-
-async def send_progress_report(chat_id, user_id):
-    progress = user_progress.get(user_id)
-    if not progress or progress["total"] == 0:
-        await bot.send_message(chat_id, "ℹ️ Пока нет данных для отчёта. Ответьте хотя бы на один вопрос.")
-        return
-
-    total = progress["total"]
-    correct_count = progress["correct"]
-    incorrect = total - correct_count
-    percent = round(correct_count / total * 100, 1)
-    answered_qs = get_all_user_shown_questions_count(user_id)
-    remaining = max(len(questions) - answered_qs, 0)
-
-    report = (
-        f"📊 <b>Промежуточный отчёт</b>\n"
-        f"Всего решено: <b>{total}</b>\n"
-        f"Верно: <b>{correct_count}</b>\n"
-        f"Ошибок: <b>{incorrect}</b>\n"
-        f"Точность: <b>{percent}%</b>\n"
-        f"📚 Ещё не отвечено: <b>{remaining}</b>"
-    )
-    await bot.send_message(chat_id, report)
 
 @router.message(Command("progress"))
 async def progress_handler(message: types.Message):
@@ -204,12 +217,16 @@ async def stats_handler(message: types.Message):
         await message.answer("📬 У вас пока нет ошибок.")
         return
 
-    text = "<b>❌ Ошибки по вопросам:</b>\n"
+    lines = ["<b>❌ Ошибки по вопросам:</b>"]
     for i, row in enumerate(rows, 1):
-        date_str = row['answered_at'].strftime('%Y-%m-%d') if row['answered_at'] else "неизвестно"
-        text += f"{i}. {row['question'][:40]}... — вы выбрали: {row['user_answer']}, верно: {row['correct_answer']} (дата: {date_str})\n"
-    await message.answer(text)
+        question = row.get('question') or "[вопрос не найден]"
+        user_answer = row.get('user_answer') or "-"
+        correct_answer = row.get('correct_answer') or "-"
+        date_obj = row.get('answered_at')
+        date_str = date_obj.strftime('%Y-%m-%d') if date_obj else "неизвестно"
+        lines.append(f"{i}. {question[:40]}... — вы выбрали: {user_answer}, верно: {correct_answer} (дата: {date_str})")
 
+    await message.answer("\n".join(lines))
 
 @router.message(Command("errors"))
 async def train_mistakes_handler(message: types.Message):
