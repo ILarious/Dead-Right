@@ -67,7 +67,7 @@ def get_user_top_mistakes(user_id, limit=5):
                 FROM user_stats
                 WHERE user_id = %s
                 GROUP BY question
-                HAVING shown >= 3
+                HAVING shown >= 1
                 ORDER BY error_rate DESC, shown DESC
                 LIMIT %s
             """, (user_id, limit))
