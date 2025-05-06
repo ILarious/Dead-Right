@@ -139,7 +139,8 @@ async def handle_answer(callback: types.CallbackQuery):
     await callback.message.edit_text(text)
 
     if mistake_mode.get(user_id):
-        mistake_questions[user_id].remove(q)
+        if q in mistake_questions.get(user_id, []):
+            mistake_questions[user_id].remove(q)
         if not mistake_questions[user_id]:
             await bot.send_message(callback.message.chat.id, "🎯 Все ошибки отработаны! Возвращаемся к обычному режиму.")
             mistake_mode[user_id] = False
