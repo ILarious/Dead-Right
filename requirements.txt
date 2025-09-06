@@ -1,4 +1,4 @@
 aiogram==3.20.0.post0
 pandas==2.2.3
 python-dotenv==1.1.0
-pymysql
+psycopg2-binary==2.9.9
