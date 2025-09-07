@@ -1,7 +1,25 @@
-#!/bin/bash
-PID=$(ps aux | grep '/opt/alt/python311/bin/python3.11 bot.py' | grep -v grep | awk '{print $2}')
-if [ -n "$PID" ]; then
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+PID_FILE="$BASE_DIR/bot.pid"
+
+if [[ -f "$PID_FILE" ]]; then
+  PID="$(cat "$PID_FILE")"
+  if kill -0 "$PID" 2>/dev/null; then
     echo "✅ Бот запущен (PID $PID)"
+    exit 0
+  else
+    echo "⚠️ PID-файл есть, но процесса нет. Удалите $PID_FILE при необходимости."
+    exit 1
+  fi
 else
-    echo "❌ Бот не работает"
+
+  if pgrep -f "[p]ython.*bot.py" >/dev/null 2>&1; then
+    echo "✅ Бот запущен (найден по имени процесса), но нет bot.pid"
+    exit 0
+  fi
+  echo "❌ Бот не работает"
+  exit 3
 fi
+
