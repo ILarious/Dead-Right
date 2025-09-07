@@ -1,6 +1,7 @@
 import random
 import asyncio
-import pymysql
+import psycopg2
+import psycopg2.extras
 import config
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
@@ -36,22 +37,23 @@ mistake_questions = {}  # user_id -> list of mistake questions
 retry_attempts = {}  # user_id -> number of retries for current question
 
 
-def load_questions_from_mysql():
-    connection = pymysql.connect(
+def load_questions_from_postgres():
+    connection = psycopg2.connect(
         host=config.DB_HOST,
         port=config.DB_PORT,
         user=config.DB_USER,
         password=config.DB_PASSWORD,
-        database=config.DB_NAME,
-        cursorclass=pymysql.cursors.DictCursor
+        dbname=config.DB_NAME
     )
+
     with connection:
-        with connection.cursor() as cursor:
+        with connection.cursor(cursor_factory=psycopg2.extras.DictCursor) as cursor:
             cursor.execute("""
-                SELECT question, option_a, option_b, option_c, option_d, option_e, correct_answer 
+                SELECT question, option_a, option_b, option_c, option_d, option_e, correct_answer
                 FROM questions
             """)
             result = cursor.fetchall()
+
             all_qs = []
             for row in result:
                 options = [row[k] for k in ['option_a', 'option_b', 'option_c', 'option_d', 'option_e'] if row[k]]
@@ -60,7 +62,8 @@ def load_questions_from_mysql():
                     "options": options,
                     "correct": row["correct_answer"]
                 })
-            return all_qs
+
+    return all_qs
 
 def create_keyboard(num_options):
     builder = InlineKeyboardBuilder()
