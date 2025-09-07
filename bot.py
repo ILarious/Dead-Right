@@ -271,7 +271,7 @@ async def help_handler(message: types.Message):
 def main():
     init_db()
     global questions
-    questions = load_questions_from_mysql()
+    questions = load_questions_from_postgres()
     dp.include_router(router)
     dp.run_polling(bot)
 
