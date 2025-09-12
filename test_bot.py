@@ -16,7 +16,6 @@ from database import (
     reset_user_stats, get_all_user_shown_questions_count,
     log_user_answer, get_daily_user_stats,
     get_user_wrong_answers, get_mistake_questions,
-    # --- чёрный список ---
     blacklist_add, blacklist_remove, blacklist_list, blacklist_is_blocked
 )
 
