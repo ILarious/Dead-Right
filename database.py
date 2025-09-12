@@ -16,7 +16,7 @@ def init_db():
     with get_connection() as conn:
         conn.autocommit = True
         with conn.cursor() as c:
-            # Statistics Table: PK Po (User_id, Question)
+            # Statistics Table: PK (user_id, question)
             c.execute("""
                 CREATE TABLE IF NOT EXISTS stats (
                     user_id BIGINT NOT NULL,
@@ -26,7 +26,8 @@ def init_db():
                     PRIMARY KEY (user_id, question)
                 )
             """)
-            # Logue of answers
+
+            # Log of answers
             c.execute("""
                 CREATE TABLE IF NOT EXISTS logs (
                     id BIGSERIAL PRIMARY KEY,
@@ -38,17 +39,78 @@ def init_db():
                     answered_at DATE NOT NULL
                 )
             """)
-            # Blacklist question
-            conn.execute(
-                """
+
+            # Blacklist of questions per user
+            c.execute("""
                 CREATE TABLE IF NOT EXISTS user_blocked_questions (
-                    user_id TEXT NOT NULL,
-                    question_id INTEGER NOT NULL,
-                    PRIMARY KEY (user_id, question_id),
-                    FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE
+                    user_id BIGINT NOT NULL,
+                    question TEXT NOT NULL,
+                    PRIMARY KEY (user_id, question)
                 )
-                """
-            )
+            """)
+
+
+def blacklist_add(user_id: int, question: str) -> None:
+    """Добавить вопрос в чёрный список пользователя (идемпотентно)."""
+    with get_connection() as conn:
+        conn.autocommit = True
+        with conn.cursor() as c:
+            c.execute("""
+                INSERT INTO user_blocked_questions (user_id, question)
+                VALUES (%s, %s)
+                ON CONFLICT (user_id, question) DO NOTHING
+            """, (user_id, question))
+
+
+def blacklist_remove(user_id: int, question: str) -> None:
+    """Удалить вопрос из чёрного списка пользователя."""
+    with get_connection() as conn:
+        conn.autocommit = True
+        with conn.cursor() as c:
+            c.execute("""
+                DELETE FROM user_blocked_questions
+                WHERE user_id = %s AND question = %s
+            """, (user_id, question))
+
+
+def blacklist_is_blocked(user_id: int, question: str) -> bool:
+    """Проверить, заблокирован ли вопрос пользователем."""
+    with get_connection() as conn:
+        with conn.cursor() as c:
+            c.execute("""
+                SELECT 1
+                FROM user_blocked_questions
+                WHERE user_id = %s AND question = %s
+                LIMIT 1
+            """, (user_id, question))
+            return c.fetchone() is not None
+
+
+def blacklist_list(user_id: int):
+    """Return the list of user blocked questions (list of lines)."""
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
+            c.execute("""
+                SELECT question
+                FROM user_blocked_questions
+                WHERE user_id = %s
+                ORDER BY question
+            """, (user_id,))
+            rows = c.fetchall()
+            return [row["question"] for row in rows]
+
+
+def blacklist_clear(user_id: int) -> None:
+    """Clean the entire black list of the user."""
+    with get_connection() as conn:
+        conn.autocommit = True
+        with conn.cursor() as c:
+            c.execute("""
+                DELETE FROM user_blocked_questions
+                WHERE user_id = %s
+            """, (user_id,))
+
+
 
 def update_stats(user_id, question, correct):
     """
@@ -122,7 +184,6 @@ def get_daily_user_stats(user_id, day):
                 WHERE user_id = %s AND answered_at = %s
             """, (user_id, day))
             row = c.fetchone()
-            # row['correct'] может быть None, если нет строк
             total = row['total'] or 0
             correct = row['correct'] or 0
             return total, correct
