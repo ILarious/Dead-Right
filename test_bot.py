@@ -21,7 +21,7 @@ from database import (
 )
 
 bot = Bot(
-    token=config.BOT_TOKEN,
+    token=config.BOT_TOKEN_TEST,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
 dp = Dispatcher()
