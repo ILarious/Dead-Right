@@ -13,7 +13,6 @@ from aiogram import Router
 
 from database import (
     init_db, update_stats,
-    get_question_stats, get_user_top_mistakes,
     reset_user_stats, get_all_user_shown_questions_count,
     log_user_answer, get_daily_user_stats,
     get_user_wrong_answers, get_mistake_questions

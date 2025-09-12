@@ -16,7 +16,7 @@ def init_db():
     with get_connection() as conn:
         conn.autocommit = True
         with conn.cursor() as c:
-            # Таблица статистики: PK по (user_id, question)
+            # Statistics Table: PK Po (User_id, Question)
             c.execute("""
                 CREATE TABLE IF NOT EXISTS stats (
                     user_id BIGINT NOT NULL,
@@ -26,7 +26,7 @@ def init_db():
                     PRIMARY KEY (user_id, question)
                 )
             """)
-            # Логи ответов
+            # Logue of answers
             c.execute("""
                 CREATE TABLE IF NOT EXISTS logs (
                     id BIGSERIAL PRIMARY KEY,
@@ -38,10 +38,21 @@ def init_db():
                     answered_at DATE NOT NULL
                 )
             """)
+            # Blacklist question
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_blocked_questions (
+                    user_id TEXT NOT NULL,
+                    question_id INTEGER NOT NULL,
+                    PRIMARY KEY (user_id, question_id),
+                    FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE
+                )
+                """
+            )
 
 def update_stats(user_id, question, correct):
     """
-    Вставляем запись, при конфликте по (user_id, question) увеличиваем счётчики.
+    We insert the recording, with a conflict in the (user_id, Question) we increase the counters.
     """
     with get_connection() as conn:
         conn.autocommit = True
@@ -101,10 +112,6 @@ def get_all_user_shown_questions_count(user_id):
             return c.fetchone()['cnt']
 
 def get_daily_user_stats(user_id, day):
-    """
-    В PostgreSQL SUM(BOOLEAN) не работает напрямую — считаем через CASE
-    или через агрегаторы с FILTER.
-    """
     with get_connection() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
             c.execute("""
@@ -132,9 +139,6 @@ def get_user_wrong_answers(user_id):
             return c.fetchall()
 
 def get_mistake_questions(user_id):
-    """
-    Ожидается таблица questions с полями option_a..option_e.
-    """
     with get_connection() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
             c.execute("""
@@ -155,7 +159,7 @@ def get_mistake_questions(user_id):
                 opt = c.fetchone()
                 if not opt:
                     continue
-                # Собираем варианты, пропуская None
+
                 options = [opt[k] for k in ('option_a', 'option_b', 'option_c', 'option_d', 'option_e') if opt.get(k)]
                 questions.append({
                     'question': q_text,
